@@ -1,0 +1,4 @@
+{
+  "main":"fr.wseduc.eliot.Eliot",
+  "port": 8030
+}

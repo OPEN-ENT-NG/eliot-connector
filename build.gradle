@@ -1,0 +1,46 @@
+apply from: "gradle/vertx.gradle"
+
+dependencies {
+	compile "org.entcore:common:$entCoreVersion"
+}
+
+test {
+
+}
+
+def configurePom(def pom) {
+  pom.project {
+    name rootProject.name
+    description 'Vert.x module for unzipping .zip files'
+    inceptionYear '2014'
+    packaging 'zip'
+    url 'https://github.com/web-education/mod-zip'
+
+    developers {
+      developer {
+        id 'dboissin'
+        name 'Damien BOISSIN'
+        email 'damien.boissin@web-education.net'
+      }
+    }
+
+    scm {
+      connection 'scm:git:ssh://git@github.com:web-education/mod-zip.git'
+      developerConnection 'scm:git:ssh://git@github.com:web-education/mod-zip.git'
+      url 'https://github.com/web-education/mod-zip.git'
+    }
+
+    licenses {
+      license {
+        name 'The Apache Software License, Version 2.0'
+        url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+        distribution 'repo'
+      }
+    }
+
+    properties {
+      setProperty('project.build.sourceEncoding', 'UTF8')
+    }
+  }
+}
+
