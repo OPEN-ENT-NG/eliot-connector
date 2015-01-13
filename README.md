@@ -1,4 +1,6 @@
-# Vert.x Eliot Module
+# À propos de l'application Rbs
 
-WebService connector module to Eliot
+* licence : [AGPL v3](http://www.gnu.org/licenses/agpl.txt)
+* financeur : Région Picardie, Conseil général  91, Région Poitou Charente
+* description : Connecteur d'intégration qui configure automatiquement les règles d'accès aux modules Eliot SaaS
 
