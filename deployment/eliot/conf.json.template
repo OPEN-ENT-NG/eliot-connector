@@ -1,5 +1,5 @@
     {
-      "name": "fr.wseduc~eliot~0.2-SNAPSHOT",
+      "name": "fr.wseduc~eliot~0.1.1",
       "config": {
         "main" : "fr.wseduc.eliot.Eliot",
         "port" : 8029,
