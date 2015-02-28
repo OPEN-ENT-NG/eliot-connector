@@ -14,8 +14,11 @@ import org.vertx.java.core.VoidHandler;
 import org.vertx.java.core.buffer.Buffer;
 import org.vertx.java.core.eventbus.Message;
 import org.vertx.java.core.http.*;
+import org.vertx.java.core.impl.VertxInternal;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
+import org.vertx.java.core.shareddata.ConcurrentSharedMap;
+import org.vertx.java.core.spi.cluster.ClusterManager;
 import org.vertx.java.platform.Container;
 
 import javax.xml.bind.JAXBContext;
@@ -34,8 +37,7 @@ public class EliotController extends BaseController {
 
 	enum Application { ABSENCES, AGENDA, NOTES, SCOLARITE, TDBASE, TEXTES }
 
-	// TODO add hazelcast support
-	private final Map<String, Applications> allowedApplication = new HashMap<>();
+	private Map<String, Applications> allowedApplication;
 	private final Map<String, String> roles = new HashMap<>();
 	private long exportedDelay;
 	private HttpClient client;
@@ -47,6 +49,14 @@ public class EliotController extends BaseController {
 		super.init(vertx, container, rm, securedActions);
 		exportedDelay = container.config().getLong("exported-delay", 5 * 60 * 1000l);
 		appliCode = container.config().getString("appli-code");
+		ConcurrentSharedMap<Object, Object> server = vertx.sharedData().getMap("server");
+		Boolean cluster = (Boolean) server.get("cluster");
+		if (Boolean.TRUE.equals(cluster) && container.config().getBoolean("cluster", false)) {
+			ClusterManager cm = ((VertxInternal) vertx).clusterManager();
+			allowedApplication = cm.getSyncMap("eliot");
+		} else {
+			allowedApplication = new HashMap<>();
+		}
 		try {
 			URI uri = new URI(container.config().getString("uri"));
 			client = vertx.createHttpClient()
