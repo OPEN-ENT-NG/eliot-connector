@@ -1,4 +1,9 @@
-import org.vertx.java.platform.impl.cli.Starter
+import org.vertx.java.core.AsyncResult
+import org.vertx.java.core.AsyncResultHandler
+import org.vertx.java.platform.PlatformLocator
+
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /*
  * Copyright 2012 the original author or authors.
@@ -20,8 +25,6 @@ apply plugin: 'java'
 apply plugin: 'groovy'
 apply plugin: 'idea'
 apply plugin: 'eclipse'
-
-def cpSeparator = System.getProperty("path.separator")
 
 // We  have to explicitly load props from the user home dir - on CI we set
 // GRADLE_USER_HOME to a different dir to avoid problems with concurrent builds corrupting
@@ -80,16 +83,6 @@ buildscript {
   dependencies {
     classpath "io.vertx:vertx-core:$vertxVersion"
     classpath "io.vertx:vertx-platform:$vertxVersion"
-    classpath "io.vertx:vertx-hazelcast:$vertxVersion"
-
-    // Extra classpath for Vert.x
-
-    // Users can be Vert.x platform classpath files (e.g. langs.properties) in either src/main/platform_lib
-    // or src/main/resources/platform_lib (if they want it in the module for fatjars)
-    classpath files(['src/main/platform_lib'])
-    classpath fileTree(dir: 'src/main/platform_lib', includes: ['*.jar', '*.zip'])
-    classpath files(['src/main/resources/platform_lib'])
-    classpath fileTree(dir: 'src/main/resources/platform_lib', includes: ['*.jar', '*.zip'])
   }
 }
 
@@ -123,10 +116,6 @@ task sourceJar(type: Jar) {
   from sourceSets.main.java
 }
 
-javadoc {
-    classpath = configurations.compile + configurations.provided
-}
-
 task javadocJar(type: Jar) {
   description = 'Builds a javadoc jar artifact suitable for maven deployment.'
   classifier = 'javadoc'
@@ -140,9 +129,19 @@ artifacts {
   archives sourceJar, javadocJar, modZip
 }
 
-
 test {
   dependsOn copyMod
+
+  if (System.getenv("JENKINS_URL") != null) {
+    // When on Jenkins we need to point at the provisioned MongoDB instance
+    systemProperty 'vertx.mongo.username', 'cloudbees'
+    systemProperty 'vertx.mongo.password', 'cca3b410a04657061acc5d7ed4593a52'
+    systemProperty 'vertx.mongo.host', 'alex.mongohq.com'
+    systemProperty 'vertx.mongo.port', '10018'
+    systemProperty 'vertx.mongo.database', '0vaZnY5bN8I2LRGIrnp2Dw'
+  }
+
+  systemProperty 'vertx.loadWithPlatformCL', 'false'
 
   // Make sure tests are always run!
   outputs.upToDateWhen { false }
@@ -151,72 +150,36 @@ test {
   testLogging.showStandardStreams = true
 
   testLogging { exceptionFormat "full" }
-
-  systemProperty 'vertx.mods', "build/mods"
 }
 
-task init(description: 'Create module link and CP file') << {
-  setSysProps()
-  doInit()
-}
-
-task collectDeps(type: Copy) {
-  destinationDir = file("build")
-  into("deps") {
-    from configurations.compile
-  }
-}
-
-task runMod(description: 'Run the module', dependsOn: collectDeps) << {
-  setSysProps()
-  // We also init here - this means for single module builds the user doesn't have to explicitly init -
-  // they can just do runMod
-  doInit()
-  args = ['runmod', moduleName]
-  def args2 = runModArgs.split("\\s+")
-  args.addAll(args2)
-  Starter.main(args as String[])
-}
-
-def doInit() {
-  File cpFile = new File("vertx_classpath.txt")
-  if (!cpFile.exists()) {
-    cpFile.createNewFile();
-    String defaultCp =
-      "src/main/resources\r\n" +
-      "bin\r\n" +
-      "out/production/${project.name}\r\n" +
-      "out/test/${project.name}\r\n" +
-      "build/deps\r\n";
-    cpFile << defaultCp;
-  }
-  def args = ['create-module-link', moduleName]
-  Starter.main(args as String[])
+task runMod(dependsOn: copyMod, description: 'Run the module using all the build dependencies (not using installed vertx') << {
+  System.setProperty("vertx.loadWithPlatformCL", "false")
+  def pm = PlatformLocator.factory.createPlatformManager()
+  def latch = new CountDownLatch(1)
+  pm.deployModule(moduleName, null, 1, new AsyncResultHandler<String>() {
+    public void handle(AsyncResult<String> asyncResult) {
+      if (asyncResult.succeeded()) {
+        println "CTRL-C to stop server"
+      } else {
+        println "Failed to deploy module"
+        asyncResult.cause().printStackTrace()
+        latch.countDown()
+      }
+    }
+  });
+  latch.await(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
 }
 
 task pullInDeps(dependsOn: copyMod, description: 'Pull in all the module dependencies for the module into the nested mods directory') << {
   if (pullInDeps == 'true') {
-    setSysProps()
-    def args = ['pulldeps', moduleName]
-    Starter.main(args as String[])
+    def pm = PlatformLocator.factory.createPlatformManager()
+    println "Pulling in dependencies for module $moduleName. Please wait"
+    if (pm.pullInDependencies(moduleName)) {
+      println "Dependencies pulled into mods directory of module"
+    } else {
+      println "Failed to pull in dependencies"
+    }
   }
-}
-
-task fatJar(dependsOn: modZip, description: 'Creates a fat executable jar which contains everything needed to run the module') << {
-  if (createFatJar == 'true') {
-    setSysProps()
-    def args = ['fatjar', moduleName, '-d', 'build/libs']
-    Starter.main(args as String[])
-  }
-}
-
-def setSysProps() {
-  System.setProperty("vertx.clusterManagerFactory", "org.vertx.java.spi.cluster.impl.hazelcast.HazelcastClusterManagerFactory")
-  String modsDir = System.getenv("VERTX_MODS")
-  if (modsDir == null) {
-    modsDir = "build/mods";
-  }
-  System.setProperty("vertx.mods", modsDir)
 }
 
 def loadProperties(String sourceFileName) {
