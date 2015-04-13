@@ -68,20 +68,7 @@ public class EliotController extends BaseController {
 		} catch (URISyntaxException e) {
 			log.error(e.getMessage(), e);
 		}
-		getStructures(new Handler<JsonArray>() {
-			@Override
-			public void handle(final JsonArray structures) {
-				if (structures != null) {
-					getApplications(structures, new Handler<Map<String, Applications>>() {
-
-						@Override
-						public void handle(Map<String, Applications> event) {
-							allowedApplication.putAll(event);
-						}
-					});
-				}
-			}
-		});
+		configureApplications(null);
 	}
 
 	@Get("/absences")
@@ -242,7 +229,7 @@ public class EliotController extends BaseController {
 							});
 						}
 					});
-				} else {
+				} else if (message != null) {
 					sendError(message, "get.structures.error");
 				}
 			}
