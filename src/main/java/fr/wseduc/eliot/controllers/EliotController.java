@@ -114,7 +114,7 @@ public class EliotController extends BaseController {
 			public void handle(String rne) {
 				if (rne != null) {
 					final StringBuilder uri = new StringBuilder();
-					final String host = container.config().getString("host");
+					final String host = getScheme(request) + "://" + getHost(request);
 					uri.append("/adapter#")
 							.append(host)
 							.append("/cas/login?ticketAttributeName=casTicket&service=");
