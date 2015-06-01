@@ -6,6 +6,9 @@ import fr.wseduc.rs.Get;
 import fr.wseduc.security.SecuredAction;
 import fr.wseduc.webutils.http.BaseController;
 import org.entcore.common.http.response.DefaultPages;
+import org.entcore.common.neo4j.Neo;
+import org.entcore.common.neo4j.Neo4j;
+import org.entcore.common.neo4j.StatementsBuilder;
 import org.entcore.common.user.UserInfos;
 import org.entcore.common.user.UserUtils;
 import org.vertx.java.core.Handler;
@@ -35,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class EliotController extends BaseController {
 
+	private Neo4j neo4j = Neo4j.getInstance();
+
 	enum Application { ABSENCES, AGENDA, NOTES, SCOLARITE, TDBASE, TEXTES }
 
 	private Map<String, Applications> allowedApplication;
@@ -42,6 +47,11 @@ public class EliotController extends BaseController {
 	private long exportedDelay;
 	private HttpClient client;
 	private String appliCode;
+
+	public static final String SCOLARITE_EXTERNAL_ID = "SCOLARITE";
+	public static final JsonObject SCOLARITE = new JsonObject()
+			.putString("externalId", SCOLARITE_EXTERNAL_ID)
+			.putString("name", "SCOLARITE");
 
 	@Override
 	public void init(Vertx vertx, Container container, RouteMatcher rm,
@@ -164,15 +174,118 @@ public class EliotController extends BaseController {
 	}
 
 	@BusAddress("user.repository")
-	public void repositoryEventsHandle(Message<JsonObject> message) {
+	public void repositoryEventsHandle(final Message<JsonObject> message) {
 		String action = message.body().getString("action", "");
 		switch (action) {
 			case "exported" :
-				exported(message);
+				setScolariteGroups(new VoidHandler() {
+					@Override
+					protected void handle() {
+						exported(message);
+					}
+				});
 				break;
 			default:
 				sendError(message, "invalid.action");
 		}
+	}
+
+	private void setScolariteGroups(final VoidHandler handler) {
+		String query =
+				"MATCH (p:Profile {name:'Personnel'})<-[:COMPOSE]-(f:Function {externalId : {functionEID}}) " +
+				"RETURN count(*) > 0 as exists ";
+		JsonObject params = new JsonObject().putString("functionEID", SCOLARITE_EXTERNAL_ID);
+		neo4j.execute(query, params, new Handler<Message<JsonObject>>() {
+			@Override
+			public void handle(Message<JsonObject> message) {
+				JsonArray res = message.body().getArray("result");
+				if ("ok".equals(message.body().getString("status")) && res != null && res.size() == 1 &&
+						res.<JsonObject>get(0).getBoolean("exists", false)) {
+					addScolariteFunction(handler);
+				} else {
+					String query =
+							"MATCH (p:Profile { name : 'Personnel'}) " +
+							"CREATE p<-[:COMPOSE]-(f:Function {props})";
+					JsonObject params = new JsonObject().putObject("props", SCOLARITE);
+					neo4j.execute(query, params, new Handler<Message<JsonObject>>() {
+						@Override
+						public void handle(Message<JsonObject> message) {
+							if ("ok".equals(message.body().getString("status"))) {
+								addScolariteFunction(handler);
+							} else {
+								handler.handle(null);
+							}
+						}
+					});
+				}
+			}
+
+			private void addScolariteFunction(final VoidHandler handler) {
+				String query =
+						"MATCH (u:User)-[:IN]->(:ProfileGroup)-[:DEPENDS]->(s:Structure) " +
+						"WHERE LENGTH(FILTER(gId IN u.functions WHERE gId =~ '.*\\\\$(EDU|DIR)\\\\$.*')) > 0 " +
+						"RETURN s.id as structureId, COLLECT(u.id) as users " +
+						"UNION " +
+						"MATCH (f:Function {externalId: 'ADMIN_LOCAL'})<-[:CONTAINS_FUNCTION*0..1]-()" +
+						"<-[rf:HAS_FUNCTION]-(u:User)-[:IN]->(:ProfileGroup)-[:DEPENDS]->(s:Structure) " +
+						"RETURN s.id as structureId, COLLECT(u.id) as users ";
+				neo4j.execute(query, (JsonObject) null, new Handler<Message<JsonObject>>() {
+					@Override
+					public void handle(Message<JsonObject> message) {
+						JsonArray res = message.body().getArray("result");
+						if ("ok".equals(message.body().getString("status")) && res != null) {
+							StatementsBuilder statements = new StatementsBuilder();
+							for (Object o: res) {
+								if (!(o instanceof JsonObject)) continue;
+								JsonObject j = (JsonObject) o;
+								addFunction(statements, j.getString("structureId"), j.getArray("users"));
+							}
+							neo4j.executeTransaction(statements.build(), null, true, new Handler<Message<JsonObject>>() {
+								@Override
+								public void handle(Message<JsonObject> message) {
+									handler.handle(null);
+								}
+							});
+						} else {
+							handler.handle(null);
+						}
+					}
+				});
+			}
+
+			private void addFunction(StatementsBuilder statements, String structureId, JsonArray users) {
+				String query =
+						"MATCH (u:User), (f:Function {externalId:'SCOLARITE'}) " +
+						"WHERE u.id IN {users} " +
+						"MERGE u-[rf:HAS_FUNCTION]->f " +
+						"SET rf.scope = CASE WHEN {scope} IN coalesce(rf.scope, []) THEN " +
+						"rf.scope ELSE coalesce(rf.scope, []) + {scope} END";
+
+				JsonObject params = new JsonObject().putArray("users", users).putString("scope", structureId);
+
+				statements.add(query, params);
+				String q2 =
+						"MATCH (n:Structure {id: {scopeId}}), (f:Function {externalId : 'SCOLARITE'}) " +
+						"WITH n, f " +
+						"MERGE (fg:Group:FunctionGroup { externalId : {externalId}}) " +
+						"ON CREATE SET fg.id = id(fg) + '-' + timestamp(), fg.name = n.name + '-' + f.name " +
+						"CREATE UNIQUE n<-[:DEPENDS]-fg";
+				String qu =
+						"MATCH (u:User), (fg:FunctionGroup { externalId : {externalId}}) " +
+						"WHERE u.id IN {users} " +
+						"CREATE UNIQUE fg<-[:IN]-u ";
+				String extId = structureId + "-SCOLARITE" ;
+				JsonObject p2 = new JsonObject()
+						.putString("scopeId", structureId)
+						.putString("functionCode", "SCOLARITE")
+						.putString("externalId", extId);
+				statements.add(q2, p2);
+				JsonObject pu = new JsonObject()
+						.putArray("users", users)
+						.putString("externalId", extId);
+				statements.add(qu, pu);
+			}
+		});
 	}
 
 	private void exported(final Message<JsonObject> message) {
@@ -384,7 +497,7 @@ public class EliotController extends BaseController {
 						for (fr.wseduc.eliot.pojo.Application app : entry.getValue().getApplications()) {
 							if (!Application.SCOLARITE.name().equals(app.getCode()) ||
 									(Application.SCOLARITE.name().equals(app.getCode()) &&
-											j.getString("name", "").contains("-Personnel"))) {
+											j.getString("name", "").contains("-SCOLARITE"))) {
 								roleIds.add(roles.get(app.getCode()));
 							}
 						}
