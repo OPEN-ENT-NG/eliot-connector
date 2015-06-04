@@ -6,7 +6,6 @@ import fr.wseduc.rs.Get;
 import fr.wseduc.security.SecuredAction;
 import fr.wseduc.webutils.http.BaseController;
 import org.entcore.common.http.response.DefaultPages;
-import org.entcore.common.neo4j.Neo;
 import org.entcore.common.neo4j.Neo4j;
 import org.entcore.common.neo4j.StatementsBuilder;
 import org.entcore.common.user.UserInfos;
@@ -155,10 +154,12 @@ public class EliotController extends BaseController {
 				if (user != null) {
 					for (String structure : user.getStructures()) {
 						Applications apps = allowedApplication.get(structure);
-						for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
-							if (application.name().equals(app.getCode())) {
-								handler.handle(apps.getRne());
-								return;
+						if (apps != null) {
+							for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
+								if (application.name().equals(app.getCode())) {
+									handler.handle(apps.getRne());
+									return;
+								}
 							}
 						}
 					}
