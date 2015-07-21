@@ -1,16 +1,31 @@
-    {
-      "name": "fr.wseduc~eliot~0.2-SNAPSHOT",
-      "config": {
-        "main" : "fr.wseduc.eliot.Eliot",
-        "port" : 8029,
-        "exported-delay" : ${eliotExportedDelay},
-        "appli-code" : "${eliotAppliCode}",
-        "uri" : "${eliotUri}",
-        "eliotUri" : "${eliotSaasUri}",
-        "host": "${host}",
-        "ssl" : $ssl,
-        "auto-redeploy": false,
-        "userbook-host": "${host}",
-        "mode" : "${mode}"
-      }
+{
+  "name": "fr.wseduc~eliot~0.2-SNAPSHOT",
+  "config": {
+    "main" : "fr.wseduc.eliot.Eliot",
+    "port" : 8029,
+    "exported-delay" : ${eliotExportedDelay},
+    "appli-code" : "${eliotAppliCode}",
+    "uri" : "${eliotUri}",
+    "eliotUri" : "${eliotSaasUri}",
+    "host": "${host}",
+    "ssl" : $ssl,
+    "auto-redeploy": false,
+    "userbook-host": "${host}",
+    "mode" : "${mode}",
+    "publicConf": {
+      <% if ("true".equals(xitiSwitch)) { %>
+        "xiti": {
+          "ID_SERVICE": {
+            "default": "",
+            "absences": "4",
+            "agenda": "7",
+            "notes": "3",
+            "scolarite": "",
+            "tdbase": "",
+            "textes": "9"
+          }
+        }
+      <% } %>
     }
+  }
+}
