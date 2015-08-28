@@ -32,7 +32,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class EliotController extends BaseController {
@@ -351,77 +350,109 @@ public class EliotController extends BaseController {
 	}
 
 	private void sendApplications(Set<String> apps, final Handler<Boolean> handler) {
-		final AtomicInteger count = new AtomicInteger(apps.size());
-		final AtomicBoolean success = new AtomicBoolean(true);
-		for (String app : apps) {
-			JsonObject application = new JsonObject()
-					.putString("name", app)
-					.putString("displayName", app.toLowerCase())
-					.putString("address", "/eliot/" + app.toLowerCase());
-			JsonObject message = new JsonObject()
-					.putObject("application", application)
-					.putString("action", "create-external-application");
-			eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
-				@Override
-				public void handle(Message<JsonObject> event) {
-					if (!"ok".equals(event.body().getString("status"))) {
-						log.error(event.body().getString("message"));
-						success.set(false);
-					}
-					if (count.decrementAndGet() <= 0) {
-						handler.handle(success.get());
-					}
-				}
-			});
+		int i = apps.size();
+		if (i < 1) {
+			log.info("Empty applications.");
+			return;
 		}
+		final VoidHandler[] handlers = new VoidHandler[i + 1];
+		handlers[i] = new VoidHandler() {
+			@Override
+			protected void handle() {
+				handler.handle(true);
+			}
+		};
+		for (final String app : apps) {
+			final int j = --i;
+			handlers[j] = new VoidHandler() {
+				@Override
+				protected void handle() {
+					JsonObject application = new JsonObject()
+							.putString("name", app)
+							.putString("displayName", app.toLowerCase())
+							.putString("address", "/eliot/" + app.toLowerCase());
+					JsonObject message = new JsonObject()
+							.putObject("application", application)
+							.putString("action", "create-external-application");
+					eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+						@Override
+						public void handle(Message<JsonObject> event) {
+							if (!"ok".equals(event.body().getString("status"))) {
+								log.error(event.body().getString("message"));
+								handler.handle(false);
+							} else {
+								handlers[j + 1].handle(null);
+							}
+						}
+					});
+				}
+			};
+		}
+		handlers[0].handle(null);
 	}
 
 	private void sendRoles(final Set<String> apps, final Handler<Boolean> handler) {
-		final AtomicInteger count = new AtomicInteger(apps.size());
-		final AtomicBoolean success = new AtomicBoolean(true);
-		for (final String application: apps) {
-			JsonObject role = new JsonObject()
-				.putString("name", application);
-			JsonArray actions = new JsonArray()
-					.add(application + "|address")
-					.add(this.getClass().getName() + "|" + application.toLowerCase());
-			final JsonObject message = new JsonObject()
-					.putString("action", "create-role")
-					.putObject("role", role)
-					.putArray("actions", actions);
-			eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
-				@Override
-				public void handle(Message<JsonObject> event) {
-					if (!"ok".equals(event.body().getString("status"))) {
-						log.error(event.body().getString("message"));
-						success.set(false);
-					}
-					if (count.decrementAndGet() <= 0) {
-						JsonObject listRolesMessage = new JsonObject()
-								.putString("action", "list-roles");
-						eb.send("wse.app.registry.bus", listRolesMessage, new Handler<Message<JsonObject>>() {
-							@Override
-							public void handle(Message<JsonObject> event) {
-								JsonArray result = event.body().getArray("result");
-								if (!"ok".equals(event.body().getString("status")) || result == null) {
-									log.error(event.body().getString("message"));
-									success.set(false);
-								} else {
-									for (Object o : result) {
-										if (!(o instanceof JsonObject)) continue;
-										JsonObject j = (JsonObject) o;
-										if (apps.contains(j.getString("name"))) {
-											roles.put(j.getString("name"), j.getString("id"));
-										}
-									}
-								}
-								handler.handle(success.get());
-							}
-						});
-					}
-				}
-			});
+		int i = apps.size();
+		if (i < 1) {
+			log.info("Empty roles.");
+			return;
 		}
+		final VoidHandler[] handlers = new VoidHandler[i + 1];
+		handlers[i] = new VoidHandler() {
+			@Override
+			protected void handle() {
+				JsonObject listRolesMessage = new JsonObject()
+						.putString("action", "list-roles");
+				eb.send("wse.app.registry.bus", listRolesMessage, new Handler<Message<JsonObject>>() {
+					@Override
+					public void handle(Message<JsonObject> event) {
+						JsonArray result = event.body().getArray("result");
+						if (!"ok".equals(event.body().getString("status")) || result == null) {
+							log.error(event.body().getString("message"));
+							handler.handle(false);
+						} else {
+							for (Object o : result) {
+								if (!(o instanceof JsonObject)) continue;
+								JsonObject j = (JsonObject) o;
+								if (apps.contains(j.getString("name"))) {
+									roles.put(j.getString("name"), j.getString("id"));
+								}
+							}
+							handler.handle(true);
+						}
+					}
+				});
+			}
+		};
+		for (final String application: apps) {
+			final int j = --i;
+			handlers[j] = new VoidHandler() {
+				@Override
+				protected void handle() {
+					JsonObject role = new JsonObject()
+							.putString("name", application);
+					JsonArray actions = new JsonArray()
+							.add(application + "|address")
+							.add(this.getClass().getName() + "|" + application.toLowerCase());
+					final JsonObject message = new JsonObject()
+							.putString("action", "create-role")
+							.putObject("role", role)
+							.putArray("actions", actions);
+					eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+						@Override
+						public void handle(Message<JsonObject> event) {
+							if (!"ok".equals(event.body().getString("status"))) {
+								log.error(event.body().getString("message"));
+								handler.handle(false);
+							} else {
+								handlers[j + 1].handle(null);
+							}
+						}
+					});
+				}
+			};
+		}
+		handlers[0].handle(null);
 	}
 
 	private void linkRolesToGroups(final Handler<Boolean> handler) {
