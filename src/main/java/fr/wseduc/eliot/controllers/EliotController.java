@@ -59,6 +59,7 @@ public class EliotController extends BaseController {
 		appliCode = container.config().getString("appli-code");
 		ConcurrentSharedMap<Object, Object> server = vertx.sharedData().getMap("server");
 		Boolean cluster = (Boolean) server.get("cluster");
+		String node = (String) server.get("node");
 		if (Boolean.TRUE.equals(cluster) && container.config().getBoolean("cluster", false)) {
 			ClusterManager cm = ((VertxInternal) vertx).clusterManager();
 			allowedApplication = cm.getSyncMap("eliot");
@@ -76,7 +77,24 @@ public class EliotController extends BaseController {
 		} catch (URISyntaxException e) {
 			log.error(e.getMessage(), e);
 		}
-		configureApplications(null);
+		if (Boolean.TRUE.equals(cluster) && node != null && !node.trim().isEmpty()) {
+			try {
+				if (Integer.parseInt(node.replaceAll("[A-Za-z]+", "")) % 2 == 0) {
+					vertx.setTimer(120000, new Handler<Long>() {
+						@Override
+						public void handle(Long aLong) {
+							configureApplications(null);
+						}
+					});
+				} else {
+					configureApplications(null);
+				}
+			} catch (NumberFormatException e) {
+				configureApplications(null);
+			}
+		} else {
+			configureApplications(null);
+		}
 	}
 
 	@Get("/absences")
