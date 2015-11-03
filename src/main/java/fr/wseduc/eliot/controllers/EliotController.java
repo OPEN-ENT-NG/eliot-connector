@@ -594,6 +594,10 @@ public class EliotController extends BaseController {
 									Applications applications = (Applications) um.unmarshal(new StringReader(event.toString()));
 									applications.setRne(rne);
 									appsByStructure.put(structure, applications);
+									if (log.isDebugEnabled()) {
+										log.debug("Structure : " + structure + " - UAI : " + rne +
+												" - APPS : " +event.toString());
+									}
 								} catch (JAXBException e) {
 									log.error("Error when unmarshal applications to structure " + rne, e);
 								} finally {
