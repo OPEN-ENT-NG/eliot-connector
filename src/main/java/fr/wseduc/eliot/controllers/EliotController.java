@@ -258,6 +258,7 @@ public class EliotController extends BaseController {
 								JsonObject j = (JsonObject) o;
 								addFunction(statements, j.getString("structureId"), j.getArray("users"));
 							}
+							removeFunctionForOldAdml(statements);
 							neo4j.executeTransaction(statements.build(), null, true, new Handler<Message<JsonObject>>() {
 								@Override
 								public void handle(Message<JsonObject> message) {
@@ -269,6 +270,17 @@ public class EliotController extends BaseController {
 						}
 					}
 				});
+			}
+
+			private void removeFunctionForOldAdml(StatementsBuilder statements) {
+				String query =
+						"MATCH (f:Function {externalId:'SCOLARITE'})<-[r:HAS_FUNCTION]-(u:User)" +
+						"-[r2:IN]->(fg:FunctionGroup), (f2:Function {externalId: 'ADMIN_LOCAL'}) " +
+						"WHERE fg.externalId =~ '.*-SCOLARITE$' " +
+						"AND LENGTH(FILTER(gId IN u.functions WHERE gId =~ '.*\\\\$(EDU|DIR)\\\\$.*')) = 0 " +
+						"AND NOT(u-[:HAS_FUNCTION]->f2) " +
+						"DELETE r, r2";
+				statements.add(query);
 			}
 
 			private void addFunction(StatementsBuilder statements, String structureId, JsonArray users) {
