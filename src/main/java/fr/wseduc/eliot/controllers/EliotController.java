@@ -324,7 +324,16 @@ public class EliotController extends BaseController {
 			vertx.setTimer(exportedDelay, new Handler<Long>() {
 				@Override
 				public void handle(Long event) {
-					configureApplications(message);
+					if (container.config().getBoolean("sunday-only", true)) {
+						Calendar c = Calendar.getInstance();
+						c.setTime(new Date());
+						int dayOfWeek = c.get(Calendar.DAY_OF_WEEK);
+						if (Calendar.SUNDAY == dayOfWeek) {
+							configureApplications(message);
+						}
+					} else {
+						configureApplications(message);
+					}
 				}
 			});
 		} else {
