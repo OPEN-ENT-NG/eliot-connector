@@ -350,26 +350,28 @@ public class EliotController extends BaseController {
 									apps.add(app.getCode());
 								}
 							}
-							sendApplications(apps, new Handler<Boolean>() {
-								@Override
-								public void handle(Boolean success) {
-									if (success) {
-										sendRoles(apps, new Handler<Boolean>() {
-											@Override
-											public void handle(Boolean success) {
-												if (success) {
-													linkRolesToGroups(new Handler<Boolean>() {
-														@Override
-														public void handle(Boolean event) {
+							if (message != null) {
+								sendApplications(apps, new Handler<Boolean>() {
+									@Override
+									public void handle(Boolean success) {
+										if (success) {
+											sendRoles(apps, new Handler<Boolean>() {
+												@Override
+												public void handle(Boolean success) {
+													if (success) {
+														linkRolesToGroups(new Handler<Boolean>() {
+															@Override
+															public void handle(Boolean event) {
 
-														}
-													});
+															}
+														});
+													}
 												}
-											}
-										});
+											});
+										}
 									}
-								}
-							});
+								});
+							}
 						}
 					});
 				} else if (message != null) {
