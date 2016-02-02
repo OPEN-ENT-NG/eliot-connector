@@ -157,6 +157,7 @@ public class EliotController extends BaseController {
 						deny(request);
 					}
 				} else {
+					log.error("Rne is null.");
 					deny(request);
 				}
 			}
@@ -171,7 +172,7 @@ public class EliotController extends BaseController {
 				if (user != null) {
 					for (String structure : user.getStructures()) {
 						Applications apps = allowedApplication.get(structure);
-						if (apps != null) {
+						if (apps != null && apps.getRne() != null) {
 							for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
 								if (application.name().equals(app.getCode())) {
 									handler.handle(apps.getRne());
