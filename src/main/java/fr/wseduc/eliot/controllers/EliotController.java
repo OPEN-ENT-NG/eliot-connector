@@ -170,7 +170,19 @@ public class EliotController extends BaseController {
 			@Override
 			public void handle(UserInfos user) {
 				if (user != null) {
-					for (String structure : user.getStructures()) {
+					final Collection<String> structures;
+					if (user.getFunctions() != null &&
+							("Teacher".equals(user.getType()) || "Personnel".equals(user.getType()))) {
+						structures = new HashSet<>();
+						for (UserInfos.Function f : user.getFunctions().values()) {
+							if (!"-".equals(f.getCode()) && f.getFunctionName() != null) {
+								structures.addAll(f.getScope());
+							}
+						}
+					} else {
+						structures = user.getStructures();
+					}
+					for (String structure : structures) {
 						Applications apps = allowedApplication.get(structure);
 						if (apps != null && apps.getRne() != null) {
 							for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
