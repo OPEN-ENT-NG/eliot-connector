@@ -169,6 +169,7 @@ public class EliotController extends BaseController {
 		UserUtils.getUserInfos(eb, request, new Handler<UserInfos>() {
 			@Override
 			public void handle(UserInfos user) {
+				boolean allowRecheck = false;
 				if (user != null) {
 					final Collection<String> structures;
 					if (user.getFunctions() != null &&
@@ -179,22 +180,29 @@ public class EliotController extends BaseController {
 								structures.addAll(f.getScope());
 							}
 						}
+						allowRecheck = true;
 					} else {
 						structures = user.getStructures();
 					}
-					for (String structure : structures) {
-						Applications apps = allowedApplication.get(structure);
-						if (apps != null && apps.getRne() != null) {
-							for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
-								if (application.name().equals(app.getCode())) {
-									handler.handle(apps.getRne());
-									return;
-								}
+					if (structuresToRne(structures)) return;
+				}
+				if (allowRecheck && structuresToRne(user.getStructures())) return;
+				deny(request);
+			}
+
+			private boolean structuresToRne(Collection<String> structures) {
+				for (String structure : structures) {
+					Applications apps = allowedApplication.get(structure);
+					if (apps != null && apps.getRne() != null) {
+						for (fr.wseduc.eliot.pojo.Application app : apps.getApplications()) {
+							if (application.name().equals(app.getCode())) {
+								handler.handle(apps.getRne());
+								return true;
 							}
 						}
 					}
 				}
-				deny(request);
+				return false;
 			}
 		});
 	}
