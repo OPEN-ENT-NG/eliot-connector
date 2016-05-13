@@ -6,5 +6,5 @@
 
 * Financeur(s) : Région Nord Pas de Calais-Picardie,  Département 91, Région Aquitaine-Limousin-Poitou-Charentes
 
-* description : Connecteur d'intégration qui configure automatiquement les règles d'accès aux modules Eliot SaaS
+* Description : Connecteur d'intégration qui configure automatiquement les règles d'accès aux modules Eliot SaaS
 
