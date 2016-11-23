@@ -38,10 +38,12 @@ import org.vertx.java.core.http.*;
 import org.vertx.java.core.impl.VertxInternal;
 import org.vertx.java.core.json.JsonArray;
 import org.vertx.java.core.json.JsonObject;
+import org.vertx.java.core.json.impl.Base64;
 import org.vertx.java.core.shareddata.ConcurrentSharedMap;
 import org.vertx.java.core.spi.cluster.ClusterManager;
 import org.vertx.java.platform.Container;
 
+import javax.crypto.Cipher;
 import javax.xml.bind.JAXBContext;
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.Unmarshaller;
@@ -50,8 +52,16 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.security.KeyFactory;
+import java.security.NoSuchAlgorithmException;
+import java.security.PublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+
+import static fr.wseduc.webutils.Utils.isNotEmpty;
 
 public class EliotController extends BaseController {
 
@@ -64,6 +74,9 @@ public class EliotController extends BaseController {
 	private long exportedDelay;
 	private HttpClient client;
 	private String appliCode;
+	private PublicKey eliotPublicKey;
+	private static final Pattern safariPattern =
+			Pattern.compile("^.* Version/[0-9\\.]+ (Mobile/[A-Z0-9]+ )?Safari/[0-9\\.]+$");
 
 	public static final String SCOLARITE_EXTERNAL_ID = "SCOLARITE";
 	public static final JsonObject SCOLARITE = new JsonObject()
@@ -96,6 +109,17 @@ public class EliotController extends BaseController {
 		} catch (URISyntaxException e) {
 			log.error(e.getMessage(), e);
 		}
+		final String publicKey = container.config().getString("eliot-public-key");
+		if (isNotEmpty(publicKey)) {
+			try {
+				X509EncodedKeySpec spec = new X509EncodedKeySpec(Base64.decode(publicKey));
+				KeyFactory kf = KeyFactory.getInstance("RSA");
+				eliotPublicKey = kf.generatePublic(spec);
+			} catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
+				log.error(e.getMessage(), e);
+			}
+		}
+
 		if (Boolean.TRUE.equals(cluster) && node != null && !node.trim().isEmpty()) {
 			try {
 				if (Integer.parseInt(node.replaceAll("[A-Za-z]+", "")) % 2 == 0) {
@@ -153,34 +177,93 @@ public class EliotController extends BaseController {
 	}
 
 	private void buildURI(final HttpServerRequest request, final Application application) {
-		getRne(request, application, new Handler<String>() {
-
+		safariCookie(request, new Handler<Boolean>() {
 			@Override
-			public void handle(String rne) {
-				if (rne != null) {
-					final StringBuilder uri = new StringBuilder();
-					final String host = getScheme(request) + "://" + getHost(request);
-					uri.append("/adapter?eliot="+application.name().toLowerCase()+"#")
-							.append(host)
-							.append("/cas/login?ticketAttributeName=casTicket&service=");
-					final StringBuilder eliotUri = new StringBuilder();
-					try {
-						eliotUri.append(container.config().getString("eliotUri"))
-								.append("&rne=").append(rne)
-								.append("&module=").append(application.name())
-								.append("&hostCAS=").append(URLEncoder.encode(host + "/cas", "UTF-8"));
-						uri.append(URLEncoder.encode(eliotUri.toString(), "UTF-8"));
-						redirect(request, uri.toString());
-					} catch (UnsupportedEncodingException e) {
-						log.error(e.getMessage(), e);
-						deny(request);
-					}
-				} else {
-					log.error("Rne is null.");
-					deny(request);
+			public void handle(Boolean execute) {
+				if (Boolean.TRUE.equals(execute)) {
+					getRne(request, application, new Handler<String>() {
+
+						@Override
+						public void handle(String rne) {
+							if (rne != null) {
+								final StringBuilder uri = new StringBuilder();
+								final String host = getScheme(request) + "://" + getHost(request);
+								uri.append("/adapter?eliot=" + application.name().toLowerCase() + "#")
+										.append(host)
+										.append("/cas/login?ticketAttributeName=casTicket&service=");
+								final StringBuilder eliotUri = new StringBuilder();
+								try {
+									eliotUri.append(container.config().getString("eliotUri"))
+											.append("&rne=").append(rne)
+											.append("&module=").append(application.name())
+											.append("&hostCAS=").append(URLEncoder.encode(host + "/cas", "UTF-8"));
+									uri.append(URLEncoder.encode(eliotUri.toString(), "UTF-8"));
+									redirect(request, uri.toString());
+								} catch (UnsupportedEncodingException e) {
+									log.error(e.getMessage(), e);
+									deny(request);
+								}
+							} else {
+								log.error("Rne is null.");
+								deny(request);
+							}
+						}
+					});
 				}
 			}
 		});
+	}
+
+	private void safariCookie(final HttpServerRequest request, final Handler<Boolean> handler) {
+		final String scc = request.params().get("safariCookieCallback");
+		if (scc != null) {
+			UserUtils.getUserInfos(eb, request, new Handler<UserInfos>() {
+				@Override
+				public void handle(UserInfos user) {
+					if (user != null) {
+						UserUtils.addSessionAttribute(eb, user.getUserId(), "safariEliotCookie", scc, null);
+					}
+				}
+			});
+			handler.handle(true);
+			return;
+		}
+		if (eliotPublicKey != null && request.headers().get("User-Agent") != null &&
+				safariPattern.matcher(request.headers().get("User-Agent")).matches()) {
+			UserUtils.getUserInfos(eb, request, new Handler<UserInfos>() {
+				@Override
+				public void handle(UserInfos user) {
+					if (user != null) {
+						if (user.getAttribute("safariEliotCookie") == null) {
+							try {
+								final String callbackUri = getScheme(request) + "://" + getHost(request) +
+										request.uri() + (!request.uri().contains("?") ? "?":"&") +
+										"safariCookieCallback=true";
+								final Cipher c = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+								c.init(Cipher.ENCRYPT_MODE, eliotPublicKey);
+								final String eUri = URLEncoder.encode(Base64.encodeBytes(
+										c.doFinal(callbackUri.getBytes("UTF-8"))), "UTF-8");
+								final String uri =
+										"/eliot-saas-util/action/utils/domainUtils" +
+										"?rUrl=" + eUri + "&t=" + System.currentTimeMillis();
+								redirect(request, container.config().getString("uri"), uri);
+							} catch (Exception e) {
+								log.error("Error encrypting rsa eliot safari url");
+								renderError(request);
+							}
+							handler.handle(false);
+						} else {
+							handler.handle(true);
+						}
+					} else {
+						unauthorized(request, "invalid.userInfos");
+						handler.handle(false);
+					}
+				}
+			});
+		} else {
+			handler.handle(true);
+		}
 	}
 
 	private void getRne(final HttpServerRequest request, final Application application,
