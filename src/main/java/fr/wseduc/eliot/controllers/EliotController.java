@@ -24,6 +24,7 @@ import fr.wseduc.eliot.pojo.Applications;
 import fr.wseduc.rs.Get;
 import fr.wseduc.security.SecuredAction;
 import fr.wseduc.webutils.http.BaseController;
+import fr.wseduc.webutils.request.CookieHelper;
 import org.entcore.common.http.response.DefaultPages;
 import org.entcore.common.neo4j.Neo4j;
 import org.entcore.common.neo4j.StatementsBuilder;
@@ -75,6 +76,7 @@ public class EliotController extends BaseController {
 	private HttpClient client;
 	private String appliCode;
 	private PublicKey eliotPublicKey;
+	private String logoutCallBack;
 	private static final Pattern safariPattern =
 			Pattern.compile("^.* Version/[0-9\\.]+ (Mobile/[A-Z0-9]+ )?Safari/[0-9\\.]+$");
 
@@ -89,6 +91,7 @@ public class EliotController extends BaseController {
 		super.init(vertx, container, rm, securedActions);
 		exportedDelay = container.config().getLong("exported-delay", 5 * 60 * 1000l);
 		appliCode = container.config().getString("appli-code");
+		logoutCallBack = container.config().getString("logoutCallback");
 		ConcurrentSharedMap<Object, Object> server = vertx.sharedData().getMap("server");
 		Boolean cluster = (Boolean) server.get("cluster");
 		String node = (String) server.get("node");
@@ -198,6 +201,9 @@ public class EliotController extends BaseController {
 											.append("&module=").append(application.name())
 											.append("&hostCAS=").append(URLEncoder.encode(host + "/cas", "UTF-8"));
 									uri.append(URLEncoder.encode(eliotUri.toString(), "UTF-8"));
+									if (isNotEmpty(logoutCallBack)) {
+										CookieHelper.set("logoutCallback", logoutCallBack, request);
+									}
 									redirect(request, uri.toString());
 								} catch (UnsupportedEncodingException e) {
 									log.error(e.getMessage(), e);

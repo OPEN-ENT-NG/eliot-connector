@@ -8,6 +8,7 @@
     "uri" : "${eliotUri}",
     "eliotUri" : "${eliotSaasUri}",
     "eliot-public-key" : "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7OmJIKfnHAauWnSwEAhi6s+8cIO0Y5HDhe7Oqm9Ko5wRWzUkEW1oDeGmaz/3L8gtZ4JprRvJOCkJETN+/Aq+S1vWMdxyjeLAXV7fI9Dlrb2MHccbmmhSC9Fic72R+AcR9Bo3oVzU3XpigP7DnZ5gI36Cmo2RTYrg7w4cj7XZm5mbW5lqr2DZNAnurWV81yWLiia88T53Kk72GMQg0OrIBMkh3cx+6pUeTRcdGNzUAhXI5xmiqB8vRdL9AKv+eFntKai3RD9LLKp6+njLzayscXIsoN6XHjFFhBg8v4xOlxp+fd+BWw4pMh0l4bjdaEIKAc4WyTHsRu7OjJeWj6m0mwIDAQAB",
+    "logoutCallback" : "${eliotLogoutCallback}",
     "host": "${host}",
     "ssl" : $ssl,
     "auto-redeploy": false,
