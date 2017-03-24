@@ -63,6 +63,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 import static fr.wseduc.webutils.Utils.isNotEmpty;
+import static org.entcore.common.user.SessionAttributes.THEME_ATTRIBUTE;
 
 public class EliotController extends BaseController {
 
@@ -202,9 +203,27 @@ public class EliotController extends BaseController {
 											.append("&hostCAS=").append(URLEncoder.encode(host + "/cas", "UTF-8"));
 									uri.append(URLEncoder.encode(eliotUri.toString(), "UTF-8"));
 									if (isNotEmpty(logoutCallBack)) {
-										CookieHelper.set("logoutCallback", logoutCallBack, request);
+										UserUtils.getUserInfos(eb, request, new Handler<UserInfos>() {
+											@Override
+											public void handle(UserInfos user) {
+												if (user != null) {
+													CookieHelper.set("logoutCallback", logoutCallBack, request);
+													UserUtils.removeSessionAttribute(eb, user.getUserId(),
+															THEME_ATTRIBUTE + getHost(request),
+															new Handler<Boolean>() {
+														@Override
+														public void handle(Boolean event) {
+															redirect(request, uri.toString());
+														}
+													});
+												} else {
+													redirect(request, uri.toString());
+												}
+											}
+										});
+									} else {
+										redirect(request, uri.toString());
 									}
-									redirect(request, uri.toString());
 								} catch (UnsupportedEncodingException e) {
 									log.error(e.getMessage(), e);
 									deny(request);
