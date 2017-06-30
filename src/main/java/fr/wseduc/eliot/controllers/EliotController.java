@@ -27,6 +27,7 @@ import fr.wseduc.webutils.http.BaseController;
 import fr.wseduc.webutils.request.CookieHelper;
 import org.entcore.common.http.response.DefaultPages;
 import org.entcore.common.neo4j.Neo4j;
+import org.entcore.common.neo4j.Neo4jUtils;
 import org.entcore.common.neo4j.StatementsBuilder;
 import org.entcore.common.user.UserInfos;
 import org.entcore.common.user.UserUtils;
@@ -746,6 +747,7 @@ public class EliotController extends BaseController {
 		final Map<String, Applications> appsByStructure = new HashMap<>();
 		final AtomicInteger count = new AtomicInteger(structures.size());
 		final String baseUri = "/eliot-saas-util/action/webService/getProductEtabWS?appli=" + appliCode + "&rne=";
+		final JsonArray activeRne = new JsonArray();
 		for (Object s : structures) {
 			if (!(s instanceof JsonObject)) continue;
 			final String structure = ((JsonObject) s).getString("id");
@@ -756,6 +758,7 @@ public class EliotController extends BaseController {
 				@Override
 				public void handle(HttpClientResponse event) {
 					if (event.statusCode() == 200) {
+						activeRne.addString(rne);
 						event.bodyHandler(new Handler<Buffer>() {
 							@Override
 							public void handle(Buffer event) {
@@ -774,6 +777,7 @@ public class EliotController extends BaseController {
 								} finally {
 									if (count.decrementAndGet() <= 0) {
 										handler.handle(appsByStructure);
+										persistActiveRne(activeRne);
 									}
 								}
 							}
@@ -789,12 +793,35 @@ public class EliotController extends BaseController {
 						});
 						if (count.decrementAndGet() <= 0) {
 							handler.handle(appsByStructure);
+							persistActiveRne(activeRne);
 						}
 					}
 				}
 			});
 			req.end();
 		}
+	}
+
+	private void persistActiveRne(JsonArray activeRne) {
+		if (activeRne == null || activeRne.size() == 0) return;
+		final JsonObject params = new JsonObject().putArray("activeRne", activeRne);
+		StatementsBuilder sb = new StatementsBuilder()
+				.add(
+						"MATCH (s:Structure) " +
+						"WHERE s.UAI IN {activeRne} AND NOT('ELIOT' IN s.exports) " +
+						"SET s.exports = coalesce(s.exports, []) + 'ELIOT' ", params)
+				.add(
+						"MATCH (s:Structure) " +
+						"WHERE HAS(s.UAI) AND NOT(s.UAI IN {activeRne}) AND 'ELIOT' IN s.exports " +
+						"SET s.exports = FILTER(e IN s.exports WHERE e <> 'ELIOT') ", params);
+		neo4j.executeTransaction(sb.build(), null, true, new Handler<Message<JsonObject>>() {
+			@Override
+			public void handle(Message<JsonObject> event) {
+				if (!"ok".equals(event.body().getString("status"))) {
+					log.error("Error setting Eliot active RNE : " + event.body().getString("message"));
+				}
+			}
+		});
 	}
 
 	private void getStructures(final Handler<JsonArray> structures) {
