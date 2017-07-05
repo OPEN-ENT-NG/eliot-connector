@@ -20,6 +20,7 @@
 package fr.wseduc.eliot.controllers;
 
 import fr.wseduc.bus.BusAddress;
+import fr.wseduc.cron.CronTrigger;
 import fr.wseduc.eliot.pojo.Applications;
 import fr.wseduc.rs.Get;
 import fr.wseduc.security.SecuredAction;
@@ -59,6 +60,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
+import java.text.ParseException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
@@ -86,6 +88,7 @@ public class EliotController extends BaseController {
 	public static final JsonObject SCOLARITE = new JsonObject()
 			.putString("externalId", SCOLARITE_EXTERNAL_ID)
 			.putString("name", "SCOLARITE");
+
 
 	@Override
 	public void init(Vertx vertx, Container container, RouteMatcher rm,
@@ -125,6 +128,7 @@ public class EliotController extends BaseController {
 			}
 		}
 
+		String defaultSyncCron = "0 45 23 * * ? *";
 		if (Boolean.TRUE.equals(cluster) && node != null && !node.trim().isEmpty()) {
 			try {
 				if (Integer.parseInt(node.replaceAll("[A-Za-z]+", "")) % 2 == 0) {
@@ -134,6 +138,7 @@ public class EliotController extends BaseController {
 							configureApplications(null);
 						}
 					});
+					defaultSyncCron = "0 50 23 * * ? *";
 				} else {
 					configureApplications(null);
 				}
@@ -142,6 +147,17 @@ public class EliotController extends BaseController {
 			}
 		} else {
 			configureApplications(null);
+		}
+		final String syncCron = container.config().getString("syncCron", defaultSyncCron);
+		try {
+			new CronTrigger(vertx, syncCron).schedule(new Handler<Long>() {
+				@Override
+				public void handle(Long event) {
+					configureApplications(null);
+				}
+			});
+		} catch (ParseException e) {
+			log.error("Error parsing sync cron expression.", e);
 		}
 	}
 
