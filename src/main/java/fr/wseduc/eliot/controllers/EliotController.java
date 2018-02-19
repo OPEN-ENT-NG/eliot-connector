@@ -26,25 +26,23 @@ import fr.wseduc.rs.Get;
 import fr.wseduc.security.SecuredAction;
 import fr.wseduc.webutils.http.BaseController;
 import fr.wseduc.webutils.request.CookieHelper;
+import io.vertx.core.shareddata.LocalMap;
 import org.entcore.common.http.response.DefaultPages;
 import org.entcore.common.neo4j.Neo4j;
-import org.entcore.common.neo4j.Neo4jUtils;
 import org.entcore.common.neo4j.StatementsBuilder;
 import org.entcore.common.user.UserInfos;
 import org.entcore.common.user.UserUtils;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.Vertx;
-import org.vertx.java.core.VoidHandler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.eventbus.Message;
-import org.vertx.java.core.http.*;
-import org.vertx.java.core.impl.VertxInternal;
-import org.vertx.java.core.json.JsonArray;
-import org.vertx.java.core.json.JsonObject;
-import org.vertx.java.core.json.impl.Base64;
-import org.vertx.java.core.shareddata.ConcurrentSharedMap;
-import org.vertx.java.core.spi.cluster.ClusterManager;
-import org.vertx.java.platform.Container;
+import io.vertx.core.Handler;
+import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.eventbus.Message;
+import io.vertx.core.http.*;
+import io.vertx.core.impl.VertxInternal;
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
+import io.vertx.core.spi.cluster.ClusterManager;
+import org.vertx.java.core.http.RouteMatcher;
+
 
 import javax.crypto.Cipher;
 import javax.xml.bind.JAXBContext;
@@ -65,6 +63,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
+import static fr.wseduc.webutils.Utils.handlerToAsyncHandler;
 import static fr.wseduc.webutils.Utils.isNotEmpty;
 import static org.entcore.common.user.SessionAttributes.THEME_ATTRIBUTE;
 
@@ -86,41 +85,42 @@ public class EliotController extends BaseController {
 
 	public static final String SCOLARITE_EXTERNAL_ID = "SCOLARITE";
 	public static final JsonObject SCOLARITE = new JsonObject()
-			.putString("externalId", SCOLARITE_EXTERNAL_ID)
-			.putString("name", "SCOLARITE");
+			.put("externalId", SCOLARITE_EXTERNAL_ID)
+			.put("name", "SCOLARITE");
 
 
 	@Override
-	public void init(Vertx vertx, Container container, RouteMatcher rm,
+	public void init(Vertx vertx, JsonObject config, RouteMatcher rm,
 			Map<String, fr.wseduc.webutils.security.SecuredAction> securedActions) {
-		super.init(vertx, container, rm, securedActions);
-		exportedDelay = container.config().getLong("exported-delay", 5 * 60 * 1000l);
-		appliCode = container.config().getString("appli-code");
-		logoutCallBack = container.config().getString("logoutCallback");
-		ConcurrentSharedMap<Object, Object> server = vertx.sharedData().getMap("server");
+		super.init(vertx, config, rm, securedActions);
+		exportedDelay = config.getLong("exported-delay", 5 * 60 * 1000l);
+		appliCode = config.getString("appli-code");
+		logoutCallBack = config.getString("logoutCallback");
+		LocalMap<Object, Object> server = vertx.sharedData().getLocalMap("server");
 		Boolean cluster = (Boolean) server.get("cluster");
 		String node = (String) server.get("node");
-		if (Boolean.TRUE.equals(cluster) && container.config().getBoolean("cluster", false)) {
-			ClusterManager cm = ((VertxInternal) vertx).clusterManager();
+		if (Boolean.TRUE.equals(cluster) && config.getBoolean("cluster", false)) {
+			ClusterManager cm = ((VertxInternal) vertx).getClusterManager();
 			allowedApplication = cm.getSyncMap("eliot");
 		} else {
 			allowedApplication = new HashMap<>();
 		}
 		try {
-			URI uri = new URI(container.config().getString("uri"));
-			client = vertx.createHttpClient()
-					.setHost(uri.getHost())
-					.setPort(uri.getPort())
+			URI uri = new URI(config.getString("uri"));
+			HttpClientOptions options = new HttpClientOptions()
+					.setDefaultHost(uri.getHost())
+					.setDefaultPort(uri.getPort())
 					.setMaxPoolSize(16)
-					.setSSL("https".equals(uri.getScheme()))
+					.setSsl("https".equals(uri.getScheme()))
 					.setKeepAlive(false);
+			client = vertx.createHttpClient(options);
 		} catch (URISyntaxException e) {
 			log.error(e.getMessage(), e);
 		}
-		final String publicKey = container.config().getString("eliot-public-key");
+		final String publicKey = config.getString("eliot-public-key");
 		if (isNotEmpty(publicKey)) {
 			try {
-				X509EncodedKeySpec spec = new X509EncodedKeySpec(Base64.decode(publicKey));
+				X509EncodedKeySpec spec = new X509EncodedKeySpec(Base64.getDecoder().decode(publicKey));
 				KeyFactory kf = KeyFactory.getInstance("RSA");
 				eliotPublicKey = kf.generatePublic(spec);
 			} catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
@@ -148,7 +148,7 @@ public class EliotController extends BaseController {
 		} else {
 			configureApplications(null);
 		}
-		final String syncCron = container.config().getString("syncCron", defaultSyncCron);
+		final String syncCron = config.getString("syncCron", defaultSyncCron);
 		try {
 			new CronTrigger(vertx, syncCron).schedule(new Handler<Long>() {
 				@Override
@@ -214,7 +214,7 @@ public class EliotController extends BaseController {
 										.append("/cas/login?ticketAttributeName=casTicket&service=");
 								final StringBuilder eliotUri = new StringBuilder();
 								try {
-									eliotUri.append(container.config().getString("eliotUri"))
+									eliotUri.append(config.getString("eliotUri"))
 											.append("&rne=").append(rne)
 											.append("&module=").append(application.name())
 											.append("&hostCAS=").append(URLEncoder.encode(host + "/cas", "UTF-8"));
@@ -283,12 +283,12 @@ public class EliotController extends BaseController {
 										"safariCookieCallback=true";
 								final Cipher c = Cipher.getInstance("RSA/ECB/PKCS1Padding");
 								c.init(Cipher.ENCRYPT_MODE, eliotPublicKey);
-								final String eUri = URLEncoder.encode(Base64.encodeBytes(
+								final String eUri = URLEncoder.encode(Base64.getEncoder().encodeToString(
 										c.doFinal(callbackUri.getBytes("UTF-8"))), "UTF-8");
 								final String uri =
 										"/eliot-saas-util/action/utils/domainUtils" +
 										"?rUrl=" + eUri + "&t=" + System.currentTimeMillis();
-								redirect(request, container.config().getString("uri"), uri);
+								redirect(request, config.getString("uri"), uri);
 							} catch (Exception e) {
 								log.error("Error encrypting rsa eliot safari url");
 								renderError(request);
@@ -361,9 +361,9 @@ public class EliotController extends BaseController {
 		String action = message.body().getString("action", "");
 		switch (action) {
 			case "exported" :
-				setScolariteGroups(new VoidHandler() {
+				setScolariteGroups(new Handler<Void>() {
 					@Override
-					protected void handle() {
+					public void handle(Void v) {
 						exported(message);
 					}
 				});
@@ -373,23 +373,23 @@ public class EliotController extends BaseController {
 		}
 	}
 
-	private void setScolariteGroups(final VoidHandler handler) {
+	private void setScolariteGroups(final Handler<Void> handler) {
 		String query =
 				"MATCH (p:Profile {name:'Personnel'})<-[:COMPOSE]-(f:Function {externalId : {functionEID}}) " +
 				"RETURN count(*) > 0 as exists ";
-		JsonObject params = new JsonObject().putString("functionEID", SCOLARITE_EXTERNAL_ID);
+		JsonObject params = new JsonObject().put("functionEID", SCOLARITE_EXTERNAL_ID);
 		neo4j.execute(query, params, new Handler<Message<JsonObject>>() {
 			@Override
 			public void handle(Message<JsonObject> message) {
-				JsonArray res = message.body().getArray("result");
+				JsonArray res = message.body().getJsonArray("result");
 				if ("ok".equals(message.body().getString("status")) && res != null && res.size() == 1 &&
-						res.<JsonObject>get(0).getBoolean("exists", false)) {
+						res.getJsonObject(0).getBoolean("exists", false)) {
 					addScolariteFunction(handler);
 				} else {
 					String query =
 							"MATCH (p:Profile { name : 'Personnel'}) " +
 							"CREATE p<-[:COMPOSE]-(f:Function {props})";
-					JsonObject params = new JsonObject().putObject("props", SCOLARITE);
+					JsonObject params = new JsonObject().put("props", SCOLARITE);
 					neo4j.execute(query, params, new Handler<Message<JsonObject>>() {
 						@Override
 						public void handle(Message<JsonObject> message) {
@@ -403,7 +403,7 @@ public class EliotController extends BaseController {
 				}
 			}
 
-			private void addScolariteFunction(final VoidHandler handler) {
+			private void addScolariteFunction(final Handler<Void> handler) {
 				String query =
 						"MATCH (u:User)-[:IN]->(:ProfileGroup)-[:DEPENDS]->(s:Structure) " +
 						"WHERE LENGTH(FILTER(gId IN u.functions WHERE gId =~ '.*\\\\$(EDU|DIR)\\\\$.*')) > 0 " +
@@ -415,13 +415,13 @@ public class EliotController extends BaseController {
 				neo4j.execute(query, (JsonObject) null, new Handler<Message<JsonObject>>() {
 					@Override
 					public void handle(Message<JsonObject> message) {
-						JsonArray res = message.body().getArray("result");
+						JsonArray res = message.body().getJsonArray("result");
 						if ("ok".equals(message.body().getString("status")) && res != null) {
 							StatementsBuilder statements = new StatementsBuilder();
 							for (Object o: res) {
 								if (!(o instanceof JsonObject)) continue;
 								JsonObject j = (JsonObject) o;
-								addFunction(statements, j.getString("structureId"), j.getArray("users"));
+								addFunction(statements, j.getString("structureId"), j.getJsonArray("users"));
 							}
 							removeFunctionForOldAdml(statements);
 							neo4j.executeTransaction(statements.build(), null, true, new Handler<Message<JsonObject>>() {
@@ -456,7 +456,7 @@ public class EliotController extends BaseController {
 						"SET rf.scope = CASE WHEN {scope} IN coalesce(rf.scope, []) THEN " +
 						"rf.scope ELSE coalesce(rf.scope, []) + {scope} END";
 
-				JsonObject params = new JsonObject().putArray("users", users).putString("scope", structureId);
+				JsonObject params = new JsonObject().put("users", users).put("scope", structureId);
 
 				statements.add(query, params);
 				String q2 =
@@ -471,13 +471,13 @@ public class EliotController extends BaseController {
 						"CREATE UNIQUE fg<-[:IN]-u ";
 				String extId = structureId + "-SCOLARITE" ;
 				JsonObject p2 = new JsonObject()
-						.putString("scopeId", structureId)
-						.putString("functionCode", "SCOLARITE")
-						.putString("externalId", extId);
+						.put("scopeId", structureId)
+						.put("functionCode", "SCOLARITE")
+						.put("externalId", extId);
 				statements.add(q2, p2);
 				JsonObject pu = new JsonObject()
-						.putArray("users", users)
-						.putString("externalId", extId);
+						.put("users", users)
+						.put("externalId", extId);
 				statements.add(qu, pu);
 			}
 		});
@@ -489,7 +489,7 @@ public class EliotController extends BaseController {
 			vertx.setTimer(exportedDelay, new Handler<Long>() {
 				@Override
 				public void handle(Long event) {
-					if (container.config().getBoolean("sunday-only", true)) {
+					if (config.getBoolean("sunday-only", true)) {
 						Calendar c = Calendar.getInstance();
 						c.setTime(new Date());
 						int dayOfWeek = c.get(Calendar.DAY_OF_WEEK);
@@ -561,26 +561,26 @@ public class EliotController extends BaseController {
 			log.info("Empty applications.");
 			return;
 		}
-		final VoidHandler[] handlers = new VoidHandler[i + 1];
-		handlers[i] = new VoidHandler() {
+		final Handler[] handlers = new Handler[i + 1];
+		handlers[i] = new Handler<Void>() {
 			@Override
-			protected void handle() {
+			public void handle(Void v) {
 				handler.handle(true);
 			}
 		};
 		for (final String app : apps) {
 			final int j = --i;
-			handlers[j] = new VoidHandler() {
+			handlers[j] = new Handler<Void>() {
 				@Override
-				protected void handle() {
+				public void handle(Void v) {
 					JsonObject application = new JsonObject()
-							.putString("name", app)
-							.putString("displayName", app.toLowerCase())
-							.putString("address", "/eliot/" + app.toLowerCase());
+							.put("name", app)
+							.put("displayName", app.toLowerCase())
+							.put("address", "/eliot/" + app.toLowerCase());
 					JsonObject message = new JsonObject()
-							.putObject("application", application)
-							.putString("action", "create-external-application");
-					eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+							.put("application", application)
+							.put("action", "create-external-application");
+					eb.send("wse.app.registry.bus", message, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 						@Override
 						public void handle(Message<JsonObject> event) {
 							if (!"ok".equals(event.body().getString("status"))) {
@@ -590,7 +590,7 @@ public class EliotController extends BaseController {
 								handlers[j + 1].handle(null);
 							}
 						}
-					});
+					}));
 				}
 			};
 		}
@@ -603,16 +603,16 @@ public class EliotController extends BaseController {
 			log.info("Empty roles.");
 			return;
 		}
-		final VoidHandler[] handlers = new VoidHandler[i + 1];
-		handlers[i] = new VoidHandler() {
+		final Handler[] handlers = new Handler[i + 1];
+		handlers[i] = new Handler<Void>() {
 			@Override
-			protected void handle() {
+			public void handle(Void v) {
 				JsonObject listRolesMessage = new JsonObject()
-						.putString("action", "list-roles");
-				eb.send("wse.app.registry.bus", listRolesMessage, new Handler<Message<JsonObject>>() {
+						.put("action", "list-roles");
+				eb.send("wse.app.registry.bus", listRolesMessage, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 					@Override
 					public void handle(Message<JsonObject> event) {
-						JsonArray result = event.body().getArray("result");
+						JsonArray result = event.body().getJsonArray("result");
 						if (!"ok".equals(event.body().getString("status")) || result == null) {
 							log.error(event.body().getString("message"));
 							handler.handle(false);
@@ -627,24 +627,24 @@ public class EliotController extends BaseController {
 							handler.handle(true);
 						}
 					}
-				});
+				}));
 			}
 		};
 		for (final String application: apps) {
 			final int j = --i;
-			handlers[j] = new VoidHandler() {
+			handlers[j] = new Handler<Void>() {
 				@Override
-				protected void handle() {
+				public void handle(Void v) {
 					JsonObject role = new JsonObject()
-							.putString("name", application);
+							.put("name", application);
 					JsonArray actions = new JsonArray()
 							.add(application + "|address")
 							.add(this.getClass().getName() + "|" + application.toLowerCase());
 					final JsonObject message = new JsonObject()
-							.putString("action", "create-role")
-							.putObject("role", role)
-							.putArray("actions", actions);
-					eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+							.put("action", "create-role")
+							.put("role", role)
+							.put("actions", actions);
+					eb.send("wse.app.registry.bus", message, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 						@Override
 						public void handle(Message<JsonObject> event) {
 							if (!"ok".equals(event.body().getString("status"))) {
@@ -654,7 +654,7 @@ public class EliotController extends BaseController {
 								handlers[j + 1].handle(null);
 							}
 						}
-					});
+					}));
 				}
 			};
 		}
@@ -667,22 +667,22 @@ public class EliotController extends BaseController {
 			log.info("Empty allowed application.");
 			return;
 		}
-		final VoidHandler[] handlers = new VoidHandler[i + 1];
-		handlers[i] = new VoidHandler() {
+		final Handler[] handlers = new Handler[i + 1];
+		handlers[i] = new Handler<Void>() {
 			@Override
-			protected void handle() {
+			public void handle(Void v) {
 				handler.handle(true);
 			}
 		};
 		for (final Map.Entry<String, Applications> entry : allowedApplication.entrySet()) {
 			final int j = --i;
-			handlers[j] = new VoidHandler() {
+			handlers[j] = new Handler<Void>() {
 				@Override
-				protected void handle() {
+				public void handle(Void v) {
 					JsonObject message = new JsonObject()
-							.putString("action", "list-groups-with-roles")
-							.putString("structureId", entry.getKey());
-					eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+							.put("action", "list-groups-with-roles")
+							.put("structureId", entry.getKey());
+					eb.send("wse.app.registry.bus", message, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 						@Override
 						public void handle(Message<JsonObject> event) {
 							if (!"ok".equals(event.body().getString("status"))) {
@@ -701,7 +701,7 @@ public class EliotController extends BaseController {
 								});
 							}
 						}
-					});
+					}));
 				}
 			};
 		}
@@ -710,26 +710,26 @@ public class EliotController extends BaseController {
 
 	private void linkRolesToGroup(Message<JsonObject> event,
 			final Map.Entry<String, Applications> entry, final Handler<Boolean> handler) {
-		JsonArray result = event.body().getArray("result");
+		JsonArray result = event.body().getJsonArray("result");
 		int k = result.size();
-		final VoidHandler[] handlers = new VoidHandler[k + 1];
-		handlers[k] = new VoidHandler() {
+		final Handler[] handlers = new Handler[k + 1];
+		handlers[k] = new Handler<Void>() {
 			@Override
-			protected void handle() {
+			public void handle(Void v) {
 				handler.handle(true);
 			}
 		};
 		for (final Object o : result) {
 			final int l = --k;
-			handlers[l] = new VoidHandler() {
+			handlers[l] = new Handler<Void>() {
 				@Override
-				protected void handle() {
+				public void handle(Void v) {
 					if (o instanceof JsonObject) {
 						JsonObject j = (JsonObject) o;
 						JsonObject message = new JsonObject()
-								.putString("action", "link-role-group")
-								.putString("groupId", j.getString("id"));
-						List r = j.getArray("roles").toList();
+								.put("action", "link-role-group")
+								.put("groupId", j.getString("id"));
+						List r = j.getJsonArray("roles").getList();
 						r.removeAll(roles.values());
 						JsonArray roleIds = new JsonArray(r);
 						for (fr.wseduc.eliot.pojo.Application app : entry.getValue().getApplications()) {
@@ -739,9 +739,9 @@ public class EliotController extends BaseController {
 								roleIds.add(roles.get(app.getCode()));
 							}
 						}
-						message.putArray("roleIds", roleIds);
+						message.put("roleIds", roleIds);
 						log.debug(message.encodePrettily());
-						eb.send("wse.app.registry.bus", message, new Handler<Message<JsonObject>>() {
+						eb.send("wse.app.registry.bus", message, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 							@Override
 							public void handle(Message<JsonObject> event) {
 								if ("ok".equals(event.body().getString("status"))) {
@@ -751,7 +751,7 @@ public class EliotController extends BaseController {
 									handler.handle(false);
 								}
 							}
-						});
+						}));
 					}
 				}
 			};
@@ -768,13 +768,13 @@ public class EliotController extends BaseController {
 			if (!(s instanceof JsonObject)) continue;
 			final String structure = ((JsonObject) s).getString("id");
 			final String rne = ((JsonObject) s).getString("UAI");
-			log.info(container.config().getString("uri"));
+			log.info(config.getString("uri"));
 			log.info(baseUri + rne);
 			HttpClientRequest req = client.get(baseUri + rne, new Handler<HttpClientResponse>() {
 				@Override
 				public void handle(HttpClientResponse event) {
 					if (event.statusCode() == 200) {
-						activeRne.addString(rne);
+						activeRne.add(rne);
 						event.bodyHandler(new Handler<Buffer>() {
 							@Override
 							public void handle(Buffer event) {
@@ -820,7 +820,7 @@ public class EliotController extends BaseController {
 
 	private void persistActiveRne(JsonArray activeRne) {
 		if (activeRne == null || activeRne.size() == 0) return;
-		final JsonObject params = new JsonObject().putArray("activeRne", activeRne);
+		final JsonObject params = new JsonObject().put("activeRne", activeRne);
 		StatementsBuilder sb = new StatementsBuilder()
 				.add(
 						"MATCH (s:Structure) " +
@@ -842,31 +842,31 @@ public class EliotController extends BaseController {
 
 	private void getStructures(final Handler<JsonArray> structures) {
 		JsonObject jo = new JsonObject();
-		jo.putString("action", "list-structures");
-		jo.putArray("fields", new JsonArray().add("id").add("UAI"));
-		eb.send("directory", jo, new Handler<Message<JsonObject>>() {
+		jo.put("action", "list-structures");
+		jo.put("fields", new JsonArray().add("id").add("UAI"));
+		eb.send("directory", jo, handlerToAsyncHandler(new Handler<Message<JsonObject>>() {
 			@Override
 			public void handle(Message<JsonObject> event) {
-				JsonArray result = event.body().getArray("result");
+				JsonArray result = event.body().getJsonArray("result");
 				if ("ok".equals(event.body().getString("status")) && result != null && result.size() > 0) {
 					structures.handle(result);
 				} else {
 					structures.handle(null);
 				}
 			}
-		});
+		}));
 	}
 
 	private void sendError(Message<JsonObject> message, String s) {
 		log.error(s);
 		message.reply(new JsonObject()
-				.putString("status", "error")
-				.putString("message", s)
+				.put("status", "error")
+				.put("message", s)
 		);
 	}
 
 	private void sendOK(Message<JsonObject> message) {
-		message.reply(new JsonObject().putString("status", "ok"));
+		message.reply(new JsonObject().put("status", "ok"));
 	}
 
 }

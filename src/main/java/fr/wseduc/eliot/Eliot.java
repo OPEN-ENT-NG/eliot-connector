@@ -25,7 +25,7 @@ import org.entcore.common.http.BaseServer;
 public class Eliot extends BaseServer {
 
 	@Override
-	public void start() {
+	public void start() throws Exception {
 		super.start();
 		addController(new EliotController());
 	}
