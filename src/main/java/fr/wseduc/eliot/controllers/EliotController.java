@@ -814,6 +814,7 @@ public class EliotController extends BaseController {
 					}
 				}
 			});
+			req.exceptionHandler(except ->  log.error("Exception when call Eliot webservice", except));
 			req.end();
 		}
 	}
