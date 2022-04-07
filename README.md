@@ -1,10 +1,10 @@
 # À propos de l'application Eliot Connector
 
-* Licence : [AGPL v3](http://www.gnu.org/licenses/agpl.txt) - Copyright Conseil Régional Nord Pas de Calais - Picardie, Conseil départemental de l'Essonne, Conseil régional d'Aquitaine-Limousin-Poitou-Charentes
+* Licence : [AGPL v3](http://www.gnu.org/licenses/agpl.txt) - Copyright Région Hauts-de-France (ex Picardie), Département de l'Essonne, Région Nouvelle Aquitaine (ex Poitou-Charentes)
 
 * Développeur(s) : ATOS
 
-* Financeur(s) : Région Nord Pas de Calais-Picardie,  Département 91, Région Aquitaine-Limousin-Poitou-Charentes
+* Financeur(s) : Région Hauts-de-France (ex Picardie), Département de l'Essonne, Région Nouvelle Aquitaine (ex Poitou-Charentes)
 
 * Description : Connecteur d'intégration qui configure automatiquement les règles d'accès aux modules Eliot SaaS
 
